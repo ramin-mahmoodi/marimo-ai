@@ -340,9 +340,24 @@ def _(
         _ensure_cuda_libs()
         _ensure_cuda_cccl()
 
-        _spinner.update(
-            "Step 1/3: Compiling llama-server with FastMTP for RTX Pro 6000..."
-        )
+        _spinner.update("Step 1/3: Checking precompiled binary or compiling...")
+        _precompiled_url = "https://github.com/ramin-mahmoodi/marimo-ai/releases/download/v1.0.0-blackwell/llama-server-blackwell-sm120.tar.gz"
+        if not _llama_bin.exists():
+            try:
+                _test_req = requests.head(_precompiled_url, allow_redirects=True, timeout=5)
+                if _test_req.status_code == 200:
+                    _spinner.update("Downloading precompiled Blackwell llama-server from your GitHub Release...")
+                    _tar_tmp = work_dir / "llama-server-blackwell-sm120.tar.gz"
+                    _run_cmd(["curl", "-sSL", "-o", str(_tar_tmp), _precompiled_url])
+                    _bin_dir = _llama_bin.parent
+                    _bin_dir.mkdir(parents=True, exist_ok=True)
+                    _run_cmd(["tar", "-xzf", str(_tar_tmp), "-C", str(_bin_dir)])
+                    _llama_bin.chmod(0o755)
+                    if _llama_bin.exists():
+                        _logs.append("⚡ Loaded precompiled llama-server (Blackwell sm_120) from GitHub Release in 3 seconds!")
+            except Exception:
+                pass
+
         if not _llama_bin.exists():
             if not (_llama_dir / "CMakeLists.txt").exists():
                 if _llama_dir.exists():

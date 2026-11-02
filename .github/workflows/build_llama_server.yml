@@ -1,0 +1,81 @@
+name: Build llama-server FastMTP (Blackwell sm_120)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build_llama_server.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Compile llama-server for NVIDIA Blackwell
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Build Essentials & Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ccache curl tar
+
+      - name: Install CUDA Toolkit 12.8
+        uses: Jimver/cuda-toolkit@v0.2.36
+        id: cuda-toolkit
+        with:
+          cuda: '12.8.0'
+
+      - name: Install CCCL Headers
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install nvidia-cuda-cccl
+
+      - name: Clone llama.cpp and Apply FastMTP Patch
+        run: |
+          git clone https://github.com/ggml-org/llama.cpp.git llama_src
+          cd llama_src
+          git checkout 4df29be4f4c3673f428170fda944a5b19f743bb8
+          curl -L -o HauhauCS-FastMTP-llama.cpp.patch \
+            https://huggingface.co/HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF/resolve/main/HauhauCS-FastMTP-llama.cpp.patch
+          git apply HauhauCS-FastMTP-llama.cpp.patch
+
+      - name: Configure CMake for Blackwell (sm_120)
+        run: |
+          cd llama_src
+          cmake -G Ninja -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="120" \
+            -DCMAKE_CUDA_FLAGS="-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK=1" \
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_CURL=OFF
+
+      - name: Compile llama-server
+        run: |
+          cd llama_src
+          cmake --build build --config Release --target llama-server -j $(nproc)
+
+      - name: Compress Binary
+        run: |
+          tar -czf llama-server-blackwell-sm120.tar.gz -C llama_src/build/bin llama-server
+          ls -lh llama-server-blackwell-sm120.tar.gz
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-blackwell
+          name: "Precompiled llama-server FastMTP for RTX Pro 6000 Blackwell (sm_120)"
+          body: |
+            ### 🚀 Precompiled `llama-server` for NVIDIA Blackwell (`sm_120`)
+            - **CUDA Version:** 12.8
+            - **Target Architecture:** `sm_120` (NVIDIA RTX PRO 6000 Blackwell Server Edition)
+            - **Patch:** HauhauCS FastMTP for Qwen3.8-27B-Uncensored-Aggressive
+            - **Commit:** `4df29be4f4c3673f428170fda944a5b19f743bb8`
+            
+            *Automatically built by GitHub Actions.*
+          files: llama-server-blackwell-sm120.tar.gz
