@@ -51,6 +51,8 @@ jobs:
             -DGGML_CUDA=ON \
             -DCMAKE_CUDA_ARCHITECTURES="120" \
             -DCMAKE_CUDA_FLAGS="-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK=1" \
+            -DGGML_STATIC=ON \
+            -DBUILD_SHARED_LIBS=OFF \
             -DLLAMA_BUILD_TESTS=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
             -DLLAMA_CURL=OFF
@@ -60,9 +62,15 @@ jobs:
           cd llama_src
           cmake --build build --config Release --target llama-server -j $(nproc)
 
-      - name: Compress Binary
+      - name: Package Binary & Shared Libraries
         run: |
-          tar -czf llama-server-blackwell-sm120.tar.gz -C llama_src/build/bin llama-server
+          cd llama_src/build/bin
+          echo "=== Built Files in bin ==="
+          ls -lah
+          # Archive all binaries and libraries in the bin directory
+          tar -czf ../../../llama-server-blackwell-sm120.tar.gz *
+          cd ../../..
+          echo "=== Final Archive Size ==="
           ls -lh llama-server-blackwell-sm120.tar.gz
 
       - name: Publish to GitHub Releases
@@ -76,6 +84,7 @@ jobs:
             - **Target Architecture:** `sm_120` (NVIDIA RTX PRO 6000 Blackwell Server Edition)
             - **Patch:** HauhauCS FastMTP for Qwen3.8-27B-Uncensored-Aggressive
             - **Commit:** `4df29be4f4c3673f428170fda944a5b19f743bb8`
+            - **Includes:** `llama-server` executable and all required implementation libraries.
             
             *Automatically built by GitHub Actions.*
           files: llama-server-blackwell-sm120.tar.gz
