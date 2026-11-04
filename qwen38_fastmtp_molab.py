@@ -789,31 +789,53 @@ def _(
 
         _sp.update("Starting zrok public tunnel...")
         _zrok_log_path = work_dir / "zrok_share.log"
-        with open(_zrok_log_path, "w", encoding="utf-8") as _zrok_log_file:
-            _cf_proc = subprocess.Popen(
-                _share_args,
-                stdout=_zrok_log_file,
-                stderr=subprocess.STDOUT,
-            )
+
+        def _launch_zrok_share():
+            with open(_zrok_log_path, "w", encoding="utf-8") as _zrok_log_file:
+                return subprocess.Popen(
+                    _share_args,
+                    stdout=_zrok_log_file,
+                    stderr=subprocess.STDOUT,
+                )
+
+        _cf_proc = _launch_zrok_share()
         state_store["cf_proc"] = _cf_proc
 
         _public_url = None
-        for _ in range(60):
-            if _cf_proc.poll() is not None:
+        for _round in range(2):
+            for _ in range(40):
+                if _cf_proc.poll() is not None:
+                    break
+                if _zrok_log_path.exists():
+                    _zt = _zrok_log_path.read_text(encoding="utf-8", errors="ignore")
+                    for _match in re.finditer(r"(?:https?://)?([a-zA-Z0-9._-]+\.shares?\.zrok\.io)", _zt):
+                        _cand = _match.group(1).strip()
+                        if not _cand.startswith("api."):
+                            _public_url = f"https://{_cand}"
+                            break
+                    if not _public_url and _zname and f"{_zname}.share" in _zt:
+                        _public_url = f"https://{_zname}.shares.zrok.io"
+                        break
+                    if _public_url:
+                        break
+                time.sleep(1)
+
+            if _public_url:
                 break
+
+            # If failed because name is locked by an orphaned previous share, auto-release it and retry
             if _zrok_log_path.exists():
                 _zt = _zrok_log_path.read_text(encoding="utf-8", errors="ignore")
-                for _match in re.finditer(r"(?:https?://)?([a-zA-Z0-9._-]+\.shares?\.zrok\.io)", _zt):
-                    _cand = _match.group(1).strip()
-                    if not _cand.startswith("api."):
-                        _public_url = f"https://{_cand}"
-                        break
-                if not _public_url and _zname and f"{_zname}.share" in _zt:
-                    _public_url = f"https://{_zname}.shares.zrok.io"
-                    break
-                if _public_url:
-                    break
-            time.sleep(1)
+                _stale_match = re.search(r"is in use by share '([a-zA-Z0-9]+)'", _zt)
+                if _stale_match and _round == 0:
+                    _stale_tok = _stale_match.group(1)
+                    _sp.update(f"Releasing stale share '{_stale_tok}' in zrok cloud...")
+                    subprocess.run([_zrok_bin, "delete", "share", _stale_tok], capture_output=True, text=True, timeout=10)
+                    time.sleep(1)
+                    _cf_proc = _launch_zrok_share()
+                    state_store["cf_proc"] = _cf_proc
+                    continue
+            break
 
         if not _public_url:
             _ztail = (
@@ -821,7 +843,7 @@ def _(
                 if _zrok_log_path.exists()
                 else "no zrok log"
             )
-            _err_detail = f" Could not bind static name '{_zname}' (it may be taken by another user)." if _zname else ""
+            _err_detail = f" Could not bind static name '{_zname}'." if _zname else ""
             raise RuntimeError(f"Could not obtain zrok public URL.{_err_detail} zrok log:\n" + _ztail)
 
         state_store["public_url"] = _public_url
