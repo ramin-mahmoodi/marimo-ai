@@ -803,11 +803,14 @@ def _(
                 break
             if _zrok_log_path.exists():
                 _zt = _zrok_log_path.read_text(encoding="utf-8", errors="ignore")
-                for _match in re.finditer(r"https?://([a-zA-Z0-9.-]+\.zrok\.io)", _zt):
-                    _cand = _match.group(1)
+                for _match in re.finditer(r"(?:https?://)?([a-zA-Z0-9._-]+\.shares?\.zrok\.io)", _zt):
+                    _cand = _match.group(1).strip()
                     if not _cand.startswith("api."):
                         _public_url = f"https://{_cand}"
                         break
+                if not _public_url and _zname and f"{_zname}.share" in _zt:
+                    _public_url = f"https://{_zname}.shares.zrok.io"
+                    break
                 if _public_url:
                     break
             time.sleep(1)
