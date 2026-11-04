@@ -179,8 +179,8 @@ def _(Path, mo, shutil, state_store, subprocess):
         ---
         ### ⚙️ Server Configuration (100% GPU VRAM Offload + `--no-mmap`)
         {mo.hstack([ctx_slider, parallel_dropdown, reasoning_dropdown], justify="start", gap=2)}
-        {mo.hstack([enable_fastmtp_chk, enable_vision_chk], justify="start", gap=2)}
-        {depth_dropdown if enable_fastmtp_chk.value else mo.md("")}
+        {mo.hstack([enable_fastmtp_chk, depth_dropdown], justify="start", gap=2)}
+        {enable_vision_chk}
 
         {setup_btn}
         """
