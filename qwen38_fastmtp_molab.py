@@ -142,11 +142,11 @@ def _(Path, mo, shutil, state_store, subprocess):
     )
     reasoning_dropdown = mo.ui.dropdown(
         options={
-            "xhigh (Maximum Deep Reasoning)": "xhigh",
-            "medium (Balanced)": "medium",
-            "low (Fast)": "low",
+            "medium (Balanced - Recommended)": "medium",
+            "low (Fast - Quick Responses)": "low",
+            "xhigh (Deep Reasoning - Can be slow)": "xhigh",
         },
-        value="xhigh (Maximum Deep Reasoning)",
+        value="medium (Balanced - Recommended)",
         label="Reasoning Effort",
     )
     enable_vision_chk = mo.ui.checkbox(
@@ -455,7 +455,7 @@ def _(
 
 @app.cell
 def _(mo):
-    # 🌉 Public tunnel via zrok
+    # 🌉 Public tunnel & Security Configuration
     # Paste your free zrok account token below, then click the Launch button.
 
     zrok_token_input = mo.ui.text(
@@ -466,24 +466,43 @@ def _(mo):
         full_width=True,
     )
 
+    zrok_name_input = mo.ui.text(
+        label="Custom Static Domain Name (optional - keep empty for auto-generated ephemeral domain)",
+        value="ramin-qwen",
+        placeholder="e.g. ramin-qwen (lowercase, alphanumeric and hyphens)",
+        full_width=True,
+    )
+
+    api_key_input = mo.ui.text(
+        label="Custom API Key (Bearer Token Authorization)",
+        value="sk-molab-local",
+        placeholder="e.g. sk-my-secret-key (or keep default)",
+        full_width=True,
+    )
+
     mo.vstack(
         [
             mo.md(
-                "### 🌉 Public tunnel via zrok\n"
+                "### 🌉 Public tunnel via zrok & Security Settings\n"
                 "1. Go to **https://zrok.io** → **Get Started** → create a free account (email only)\n"
                 "2. Copy your account token and paste it into the field below\n"
-                "3. Click button **2. Launch / Restart GPU Server & Public Tunnel**\n\n"
-                "✅ No dashboard, no bindings. The first launch enables zrok and starts the tunnel; you get a public HTTPS URL."
+                "3. *(Optional)* Set a custom static domain name (e.g. `ramin-qwen` → `https://ramin-qwen.share.zrok.io`)\n"
+                "4. *(Optional)* Set your preferred API key (secures your endpoint from unauthorized web scans)\n"
+                "5. Click button **2. Launch / Restart GPU Server & Public Tunnel**\n\n"
+                "✅ When static name and API key are set, your endpoint and authorization stay identical across sessions!"
             ),
             zrok_token_input,
+            zrok_name_input,
+            api_key_input,
         ]
     )
-    return (zrok_token_input,)
+    return (api_key_input, zrok_name_input, zrok_token_input)
 
 
 @app.cell
 def _(
     Path,
+    api_key_input,
     artifacts,
     ctx_slider,
     depth_dropdown,
@@ -498,6 +517,7 @@ def _(
     subprocess,
     time,
     work_dir,
+    zrok_name_input,
     zrok_token_input,
 ):
     mo.stop(
@@ -521,6 +541,7 @@ def _(
                         pass
                 state_store[_key] = None
         subprocess.run(["pkill", "-f", "llama-server"], check=False)
+        subprocess.run(["pkill", "-f", "zrok"], check=False)
         time.sleep(1)
 
     _stop_existing()
@@ -635,6 +656,10 @@ def _(
         "8081",
     ]
 
+    _api_key = (api_key_input.value or "sk-molab-local").strip()
+    if _api_key:
+        _llama_cmd.extend(["--api-key", _api_key])
+
     if artifacts.get("mmproj_path") and Path(artifacts["mmproj_path"]).exists():
         _llama_cmd.extend(["--mmproj", artifacts["mmproj_path"]])
 
@@ -699,29 +724,64 @@ def _(
                     + (_en.stdout or "") + (_en.stderr or "")
                 )
         
+        _raw_name = (zrok_name_input.value or "").strip().lower()
+        _zname = re.sub(r"[^a-z0-9-]", "", _raw_name)
+
+        if _zname:
+            _sp.update(f"Reserving static name '{_zname}' in zrok public namespace...")
+            # 'zrok2 create name -n public <name>'
+            # Ignore exit code in case the name was already created/reserved in a prior run
+            subprocess.run(
+                [_zrok_bin, "create", "name", "-n", "public", _zname],
+                capture_output=True,
+                text=True,
+            )
+            _share_args = [
+                _zrok_bin,
+                "share",
+                "public",
+                "http://127.0.0.1:8081",
+                "-n",
+                f"public:{_zname}",
+                "--backend-mode",
+                "proxy",
+                "--headless",
+                "--open",
+            ]
+        else:
+            _share_args = [
+                _zrok_bin,
+                "share",
+                "public",
+                "http://127.0.0.1:8081",
+                "--backend-mode",
+                "proxy",
+                "--headless",
+                "--open",
+            ]
+
         _sp.update("Starting zrok public tunnel...")
         _zrok_log_path = work_dir / "zrok_share.log"
         with open(_zrok_log_path, "w", encoding="utf-8") as _zrok_log_file:
             _cf_proc = subprocess.Popen(
-                [
-                    _zrok_bin, "share", "public", "http://127.0.0.1:8081",
-                    "--backend-mode", "proxy", "--headless", "--open",
-                ],
+                _share_args,
                 stdout=_zrok_log_file,
                 stderr=subprocess.STDOUT,
             )
         state_store["cf_proc"] = _cf_proc
 
         _public_url = None
-        _zurl_pattern = re.compile(r"(?:https?://)?([a-zA-Z0-9.-]+\.zrok\.io)")
         for _ in range(60):
             if _cf_proc.poll() is not None:
                 break
             if _zrok_log_path.exists():
                 _zt = _zrok_log_path.read_text(encoding="utf-8", errors="ignore")
-                _m2 = _zurl_pattern.search(_zt)
-                if _m2:
-                    _public_url = "https://" + _m2.group(1)
+                for _match in re.finditer(r"https?://([a-zA-Z0-9.-]+\.zrok\.io)", _zt):
+                    _cand = _match.group(1)
+                    if not _cand.startswith("api."):
+                        _public_url = f"https://{_cand}"
+                        break
+                if _public_url:
                     break
             time.sleep(1)
 
@@ -731,7 +791,8 @@ def _(
                 if _zrok_log_path.exists()
                 else "no zrok log"
             )
-            raise RuntimeError("Could not obtain zrok public URL. zrok log:\n" + _ztail)
+            _err_detail = f" Could not bind static name '{_zname}' (it may be taken by another user)." if _zname else ""
+            raise RuntimeError(f"Could not obtain zrok public URL.{_err_detail} zrok log:\n" + _ztail)
 
         state_store["public_url"] = _public_url
 
@@ -739,7 +800,7 @@ def _(
         "base_url": f"{_public_url}/v1",
         "chat_completions": f"{_public_url}/v1/chat/completions",
         "model": "qwen3.8-27b",
-        "api_key": "sk-molab-local",
+        "api_key": _api_key,
     }
 
     refresh_btn = mo.ui.run_button(label="🔄 Refresh VRAM & Server Logs", kind="neutral")
@@ -754,7 +815,7 @@ def _(
         | **OpenAI Base URL** | `{endpoint_info["base_url"]}` |
         | **Chat Completions URL** | `{endpoint_info["chat_completions"]}` |
         | **Model Name** | `{endpoint_info["model"]}` |
-        | **API Key** | `{endpoint_info["api_key"]}` *(any non-empty string works)* |
+        | **API Key** | `{endpoint_info["api_key"]}` |
 
         ---
         ### ⚡ Quick Test Command (from your own machine)

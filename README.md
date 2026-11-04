@@ -53,14 +53,18 @@ https://molab.marimo.io/?notebook=https://github.com/ramin-mahmoodi/marimo-ai/bl
 
 ### 2. Configure & Build (Cell 1 & 2)
 1. Select your desired Context Size (default: `131,072`).
-2. Keep **FastMTP Depth 3** and **Reasoning Effort `xhigh`**.
+2. Keep **FastMTP Depth 3** and choose **Reasoning Effort `medium`** (recommended for agents) or `xhigh` (deep reasoning).
 3. Click **`1. Build Patched llama.cpp + Download Q8_K_P & FastMTP`**.
    *(If the precompiled release asset is available, setup takes under 2 minutes).*
 
-### 3. Start Public Tunnel (Cell 3 & 4)
+### 3. Start Public Tunnel with Static Domain & Custom API Key (Cell 3 & 4)
 1. Get a free token from [zrok.io](https://zrok.io) (email only, no credit card).
 2. Paste the token into the `zrok account token` field.
-3. Click **`2. Launch / Restart GPU Server & Public Tunnel`**.
+3. *(Optional)* Set a custom static name in `Custom Static Domain Name` (e.g. `ramin-qwen`).
+   * This reserves `ramin-qwen` in the zrok namespace, giving you a fixed permanent URL like `https://ramin-qwen.share.zrok.io`.
+   * You only need to configure Hermes once, and the URL never changes across molab restarts!
+4. *(Optional)* Enter your desired `Custom API Key` (e.g. `sk-my-custom-key`). The server enforces Bearer token authentication via `--api-key` to protect your GPU from unauthorized traffic.
+5. Click **`2. Launch / Restart GPU Server & Public Tunnel`**.
 
 ---
 
@@ -68,12 +72,22 @@ https://molab.marimo.io/?notebook=https://github.com/ramin-mahmoodi/marimo-ai/bl
 
 Once online, the notebook displays your live connection credentials:
 
-| Parameter | Value |
-| :--- | :--- |
-| **OpenAI Base URL** | `https://<unique-id>.shares.zrok.io/v1` |
-| **Chat Completions URL** | `https://<unique-id>.shares.zrok.io/v1/chat/completions` |
-| **Model Name** | `qwen3.8-27b` |
-| **API Key** | `sk-molab-local` *(any non-empty string)* |
+| Parameter | Dynamic Tunnel | Static Domain Example |
+| :--- | :--- | :--- |
+| **OpenAI Base URL** | `https://<unique-id>.shares.zrok.io/v1` | `https://ramin-qwen.share.zrok.io/v1` |
+| **Chat Completions URL** | `https://<unique-id>.shares.zrok.io/v1/chat/completions` | `https://ramin-qwen.share.zrok.io/v1/chat/completions` |
+| **Model Name** | `qwen3.8-27b` | `qwen3.8-27b` |
+| **API Key** | Configured in Cell 3 (default: `sk-molab-local`) | Configured in Cell 3 |
+
+### 🤖 Hermes Recommended Configuration (`~/.hermes/config.yaml`)
+To prevent Hermes from hitting default context truncation (64k) or getting stuck in endless reasoning loops:
+```yaml
+model: "qwen3.8-27b"
+openai_base_url: "https://ramin-qwen.share.zrok.io/v1"
+openai_api_key: "sk-molab-local"
+context_length: 131072
+reasoning_effort: "medium"  # use "medium" or "low" for responsive agent tool calls
+```
 
 ### Example cURL Request:
 ```bash
