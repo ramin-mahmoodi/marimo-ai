@@ -135,6 +135,15 @@ def _(Path, mo, shutil, state_store, subprocess):
         label="Context Size (--ctx-size)",
         show_value=True,
     )
+    parallel_dropdown = mo.ui.dropdown(
+        options={
+            "2 Slots (Recommended for Multi-Chat & Concurrent Requests)": 2,
+            "1 Slot (Single-Chat / Maximum FastMTP Speed)": 1,
+            "4 Slots (High Concurrency / Multi-Agent)": 4,
+        },
+        value="2 Slots (Recommended for Multi-Chat & Concurrent Requests)",
+        label="Parallel Slots (--parallel)",
+    )
     depth_dropdown = mo.ui.dropdown(
         options={"Depth 3 (Recommended by HauhauCS for Blackwell)": 3, "Depth 2": 2},
         value="Depth 3 (Recommended by HauhauCS for Blackwell)",
@@ -148,6 +157,10 @@ def _(Path, mo, shutil, state_store, subprocess):
         },
         value="medium (Balanced - Recommended)",
         label="Reasoning Effort",
+    )
+    enable_fastmtp_chk = mo.ui.checkbox(
+        value=False,
+        label="⚡ Enable FastMTP Speculative Decoding (Boosts single chat to ~60 tok/s; keep unchecked for rock-solid concurrent multi-chat)",
     )
     enable_vision_chk = mo.ui.checkbox(
         value=True, label="Load BF16 Vision Projector (mmproj - 931 MB)"
@@ -165,8 +178,9 @@ def _(Path, mo, shutil, state_store, subprocess):
 
         ---
         ### ⚙️ Server Configuration (100% GPU VRAM Offload + `--no-mmap`)
-        {mo.hstack([ctx_slider, depth_dropdown, reasoning_dropdown], justify="start", gap=2)}
-        {enable_vision_chk}
+        {mo.hstack([ctx_slider, parallel_dropdown, reasoning_dropdown], justify="start", gap=2)}
+        {mo.hstack([enable_fastmtp_chk, enable_vision_chk], justify="start", gap=2)}
+        {depth_dropdown if enable_fastmtp_chk.value else mo.md("")}
 
         {setup_btn}
         """
@@ -174,7 +188,9 @@ def _(Path, mo, shutil, state_store, subprocess):
     return (
         ctx_slider,
         depth_dropdown,
+        enable_fastmtp_chk,
         enable_vision_chk,
+        parallel_dropdown,
         reasoning_dropdown,
         setup_btn,
         work_dir,
@@ -506,8 +522,10 @@ def _(
     artifacts,
     ctx_slider,
     depth_dropdown,
+    enable_fastmtp_chk,
     mo,
     os,
+    parallel_dropdown,
     re,
     reasoning_dropdown,
     requests,
@@ -594,31 +612,25 @@ def _(
 
     _llama_log_path = work_dir / "llama_server.log"
 
+    _parallel_val = str(parallel_dropdown.value)
     _depth_val = str(depth_dropdown.value)
     _ctx_val = str(ctx_slider.value)
     _effort_val = str(reasoning_dropdown.value)
 
-    # Exact HauhauCS Blackwell FastMTP flags + Hermes Agent compatibility (--jinja, --reasoning-format deepseek)
+    # Standard continuous-batching flags + multi-slot parallelism + Hermes Agent compatibility
     _llama_cmd = [
         artifacts["llama_bin"],
         "--model",
         artifacts["model_path"],
         "--alias",
         "qwen3.8-27b",
-        "--spec-draft-model",
-        artifacts["draft_path"],
-        "--spec-draft-ngl",
-        "all",
-        "--spec-type",
-        "draft-mtp",
-        "--spec-draft-n-max",
-        _depth_val,
-        "--spec-draft-p-min",
-        "0",
         "--ctx-size",
         _ctx_val,
         "--parallel",
-        "1",
+        _parallel_val,
+        "--cont-batching",
+        "--threads-http",
+        "32",
         "--batch-size",
         "2048",
         "--ubatch-size",
@@ -656,6 +668,21 @@ def _(
         "8081",
     ]
 
+    # FastMTP Speculative Decoding: Enabled when user explicitly selects it (best for single-slot 1-turn stream)
+    if enable_fastmtp_chk.value and artifacts.get("draft_path") and Path(artifacts["draft_path"]).exists():
+        _llama_cmd.extend([
+            "--spec-draft-model",
+            artifacts["draft_path"],
+            "--spec-draft-ngl",
+            "all",
+            "--spec-type",
+            "draft-mtp",
+            "--spec-draft-n-max",
+            _depth_val,
+            "--spec-draft-p-min",
+            "0",
+        ])
+
     _api_key = (api_key_input.value or "sk-molab-local").strip()
     if _api_key:
         _llama_cmd.extend(["--api-key", _api_key])
@@ -667,7 +694,7 @@ def _(
     _env["CUDA_VISIBLE_DEVICES"] = "0"
 
     with mo.status.spinner(
-        title="Loading 33.3 GB (Q8_K_P + FastMTP + Vision) directly into 96 GB Blackwell VRAM (--no-mmap)..."
+        title=f"Loading Q8_K_P ({_parallel_val} parallel slots) directly into 96 GB Blackwell VRAM (--no-mmap)..."
     ) as _sp:
         with open(_llama_log_path, "w", encoding="utf-8") as _llama_log_file:
             _llama_proc = subprocess.Popen(

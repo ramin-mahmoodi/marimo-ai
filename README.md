@@ -53,8 +53,12 @@ https://molab.marimo.io/?notebook=https://github.com/ramin-mahmoodi/marimo-ai/bl
 
 ### 2. Configure & Build (Cell 1 & 2)
 1. Select your desired Context Size (default: `131,072`).
-2. Keep **FastMTP Depth 3** and choose **Reasoning Effort `medium`** (recommended for agents) or `xhigh` (deep reasoning).
-3. Click **`1. Build Patched llama.cpp + Download Q8_K_P & FastMTP`**.
+2. Choose **Parallel Slots** (default: `2 Slots` for multi-chat and concurrent requests, or `1 Slot` for single-turn benchmarks).
+3. **Continuous Batching & FastMTP Toggle:**
+   * **Multi-Chat / Concurrent API Requests (Recommended):** Leave `Enable FastMTP` **unchecked**. The server uses native CUDA continuous batching (`--cont-batching`, `--threads-http 32`, `--parallel 2`). On RTX PRO 6000 Blackwell (1.8 TB/s GDDR7), native generation runs at **~45–50 tok/s** with zero deadlocks and 100% stability under concurrent load.
+   * **Single-Turn Benchmark:** Check `Enable FastMTP` with `1 Slot` for max single-stream throughput (~60 tok/s).
+4. Choose **Reasoning Effort `medium`** (recommended for agents) or `low`/`xhigh`.
+5. Click **`1. Build Patched llama.cpp + Download Q8_K_P & FastMTP`**.
    *(If the precompiled release asset is available, setup takes under 2 minutes).*
 
 ### 3. Start Public Tunnel with Static Domain & Custom API Key (Cell 3 & 4)
